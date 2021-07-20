@@ -1,0 +1,198 @@
+<html>
+<header>
+    <style type="text/css">
+        body {
+            background-color: black;
+            margin: 0;
+            padding: 0;
+        }
+    </style>
+    <script>
+        (function (host) {
+            var MAX_VALUE = 4;
+            var MAX_ITERATIONS = 255;
+            var MAX_COLOR = 255;
+            var COLOR_SCALE = Math.floor(MAX_COLOR / MAX_ITERATIONS);
+            var FULLY_OPAQUE_ALPHA = 255;
+
+            function getColor(iteration) {
+                return Math.min(COLOR_SCALE * iteration, MAX_COLOR);
+            }
+
+            function getEscapeIterationsNumber(pointX, pointY) {
+                var currentIteration = 0;
+                var x = 0;
+                var y = 0;
+                while ((currentIteration < MAX_ITERATIONS) &&
+                    (x * x + y * y < MAX_VALUE)) {
+                    const xOfSquare = x * x - y * y;
+                    const yOfSquare = 2 * x * y;
+                    x = xOfSquare + pointX;
+                    y = yOfSquare + pointY;
+                    currentIteration++;
+                }
+                return currentIteration;
+            }
+
+            host.EscapeAlgorithm = {
+                getColor: function (x, y) {
+                    return getColor(getEscapeIterationsNumber(x, y));
+                }
+            };
+        })(this);
+        (function (host) {
+
+            const FULLY_OPAQUE_ALHPA = 255;
+
+            function Display(canvas, width, height) {
+                this.canvas = canvas;
+                this.width = width;
+                this.height = height;
+                this.context = null;
+                this.imageData = null;
+            }
+
+            Display.prototype.initialize = function () {
+                this.canvas.setAttribute('width', window.innerWidth);
+                this.canvas.setAttribute('height', window.innerHeight);
+                this.context = this.canvas.getContext('2d');
+                this.context.font = '20px Arial';
+                this.imageData = this.context.getImageData(0, 0, this.width, this.height);
+            };
+
+            Display.prototype.drawPixel = function (x, y, color) {
+                var index = (y * this.width + x) * 4;
+                this.imageData.data[index + 0] = color;
+                this.imageData.data[index + 1] = color;
+                this.imageData.data[index + 2] = color;
+                this.imageData.data[index + 3] = FULLY_OPAQUE_ALHPA;
+            };
+
+            Display.prototype.repaint = function () {
+                this.context.putImageData(this.imageData, 0, 0);
+            };
+
+            Display.prototype.showComputationBorder = function (y) {
+                this.context.fillRect(0, y, this.width, 1);
+            };
+
+            Display.prototype.showProgress = function (progress, speed) {
+                this.context.fillStyle = 'green';
+                var progressInfo = progress.toFixed(2) + '%';
+                var speedInfo = 'Speed ' + speed + 'K pixels/second';
+                this.context.fillText('Drawing Mandelbrot set... ' + progressInfo + ' ' + speedInfo, 20, 20);
+            };
+            host.Display = Display;
+        })(this);
+
+        (function (host) {
+            const UPDATE_CANVAS_STEP = 50;
+            
+            function MandelbrotSetVisualization(display, width, height) {
+                this.display = display;
+                this.width = width;
+                this.height = height;
+                this.size = Math.min(width, height);
+                this.totalProgressPercent = 0;
+                this.progressPerLinePercent = (1 / height) * 100;
+            }
+
+            MandelbrotSetVisualization.prototype.computeAndDraw = function (zoom, centerX, centerY) {
+                var self = this;
+                var startTime = Date.getTime;
+                var width = this.width;
+                var height = this.height;
+                this.totalProgress = 0;
+                var promises = [];
+                for (var y = 0; y < height; y++) {
+                    promises.push(
+                        new Promise(function (resolve, reject) {
+                            setTimeout(function (y) {
+                                for (var x = 0; x < width; x++) {
+                                    const color = EscapeAlgorithm.getColor(
+                                        self.scaleX(x, zoom, centerX), self.scaleY(y, zoom, centerY)
+                                    );
+                                    self.display.drawPixel(x, y, color);
+                                }
+                                self.totalProgressPercent += self.progressPerLinePercent;
+                                self.drawCurrentState(y);
+                                resolve();
+                            }, 0, y);
+                        }));
+                }
+                Promise.all(promises).then(function () {
+                    self.display.repaint();
+                });
+            };
+
+            MandelbrotSetVisualization.prototype.scaleX = function (x, zoom, centerX) {
+
+                // return (zoom * x / this.size) - (zoom * this.width) / (2 * this.size);
+                return (zoom * x / this.size) - centerX / this.size;  
+            };
+            MandelbrotSetVisualization.prototype.scaleY = function (y, zoom, centerY) {
+                return (zoom * y / this.size) - centerY / this.size;
+                // return (zoom * y / this.size) - (zoom * this.height) / (2 * this.size);
+            };
+
+            MandelbrotSetVisualization.prototype.drawCurrentState = function (y) {
+                if (y % UPDATE_CANVAS_STEP === 0) {
+                    this.display.repaint();
+                    // const elapsedTime = new Date().getTime - this.startTime;
+                    // const kPxPerSec = Math.floor(((y + 1) * this.width) / elapsedTime);
+                    // this.display.showComputationBorder(y);
+                    // this.display.showProgress(this.totalProgressPercent, kPxPerSec);
+                }
+            };
+            host.MandelbrotSetVisualization = MandelbrotSetVisualization;
+        })(this);
+
+        const ZOOM_SCALE = 0.9090909;
+
+        async function main() {
+            var width = window.innerWidth;
+            var height = window.innerHeight;
+            var canvas = document.querySelector('canvas');
+            var mouseX = 0;
+            var mouseY = 0;
+            canvas.addEventListener("mousemove", function(e) { 
+                var cRect = canvas.getBoundingClientRect();              // Gets the CSS positions along with width/height
+                mouseX = Math.round(e.clientX - cRect.left - width/2);        // Subtract the 'left' of the canvas from the X/Y
+                mouseY = Math.round(e.clientY - cRect.top - height/2); 
+            });
+            var display = new Display(canvas, width, height);
+            display.initialize();
+            var direction = 1;
+            var zoom = 1;
+            var oldZoom = 1;
+            var setOfMandelbrot = new MandelbrotSetVisualization(display, width, height);
+            var centerX = width/2;
+            var centerY = height/2;
+            while (true) {
+                await new Promise(r => setTimeout(r, 100));
+                centerX = centerX - mouseX * oldZoom;
+                centerY = centerY - mouseY * oldZoom;
+                setOfMandelbrot.computeAndDraw(zoom, centerX, centerY);
+                oldZoom = zoom;
+                zoom = zoom * ZOOM_SCALE;
+            }
+
+            
+            
+            
+        }
+
+
+        
+        window.addEventListener('load', main)
+    </script>
+    <title>
+        Mandelbrot Set Visualization
+    </title>
+</header>
+
+<body>
+    <canvas></canvas>
+</body>
+
+</html>
